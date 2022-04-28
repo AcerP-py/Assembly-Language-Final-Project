@@ -1,0 +1,460 @@
+# Asa Rentschler - Final Project
+
+
+# constants
+.set IO_BASE,		0xff200000			# base io address
+
+.set LEDS,			0x0					# LED offset
+
+.set SWITCHES,		0x040				# SWITCHES offset
+
+.set BUTTONS_DATA,	0x50				# BUTTONS, DATA offset
+.set BUTTONS_MASK,	0x8+BUTTONS_DATA	# MASK offset
+.set BUTTONS_EDGE,	0xc+BUTTONS_DATA	# EDGE offset
+
+.set SSD1,			0x20				# seven-segment-display segment 1 offset
+.set SSD2,			0x30				# seven-segment-display segment 2 offset
+
+.set UART_DATA,		0x1000				# UART, DATA offset
+.set UART_CTRL,		0x4+UART_DATA		# CTRL offset
+
+.set TIMER1_DATA,	0x2000				# TIMER1, DATA offset
+.set TIMER1_CTRL,	0x4+TIMER1_DATA		# CTRL offset
+.set TIMER1_LC,		0x8+TIMER1_DATA		# LC offset
+.set TIMER1_HC,		0xc+TIMER1_DATA		# HC offset
+.set TIMER_CDV,		100000000			# TIMER COUNT DOWN VALUE
+
+.set TOS,			0x400000			# top of stack
+
+.global _start
+.text
+_start:
+
+movia r23, IO_BASE		# store base io address in r23
+movia sp, TOS			# store stack address in sp
+
+call set_timer			# set up the timer
+call set_buttons		# set up the buttons
+call enable_interrupts	# start interrupts
+
+
+loop: 	# loop forever
+
+call count_switches								# count the number of switches selected
+
+ldw r2, number_of_switches_selected(r0)			#\
+ldw r3, prev_number_of_switches_selected(r0)	 #| if the number of selected switches has changed...
+cmpne r4, r3, r2								 #|
+beq r4, r0, no_subs								#/
+
+	call set_timer								# restart the timer
+	call update_SSD								# update the SSD
+	call update_LEDS							# update the LEDs
+	call print_number_to_UART					# update the UART
+
+no_subs:
+
+br loop	# loop forever
+
+
+/* Subroutine for updating the LEDs. */
+update_LEDS:
+	subi sp, sp, 4	# stack
+	stw r16, 0(sp)
+	
+		ldwio r16, SWITCHES(r23)	# load the value from the switches
+		stwio r16, LEDS(r23)		# store that value in the LEDs
+		
+	ldw r16, 0(sp)	# unstack
+	addi sp, sp, 4
+	ret
+
+
+/* Count how many switches are selected. */
+count_switches:
+	subi sp, sp, 16	#\
+	stw r16, 0(sp)	 #\
+	stw r17, 4(sp)	  #| store r16-r19 to the stack
+	stw r18, 8(sp) 	 #/
+	stw r19, 12(sp)	#/
+	
+		ldw r16, number_of_switches_selected(r0)		#\ update prev_number_of_switches
+		stw r16, prev_number_of_switches_selected(r0)	#/
+
+		ldwio r16, SWITCHES(r23)		# load the value from the switches into r16
+		slli r16, r16, 22 				# shift the value from the switches 22 bits to the left to ignore the extra bits
+		mov r17, r0						# set r17 to 0 to use it as an acumulator
+		mov r18, r0						# i = 0
+		whileSWC:	cmplti r19, r18, 10		#\
+					addi r18, r18, 1 		 #| while(i < 10) and i++
+					beq r19, r0, _whileSWC	#/
+					ifSWC: 	cmplt r19, r16, r0		#\ if (r16 < r0) "if r16 is negative"
+							beq r19, r0, skipSWC	#/
+							addi r17, r17, 1		# ++ the accumulator
+					skipSWC:						# skip incrementing the acumulator
+					slli r16, r16, 1 		# shift the value from the switches 1 digit to the left to look at the next bit
+					br whileSWC
+		_whileSWC:
+
+		stw r17, number_of_switches_selected(r0)				# store the numer of switches selected
+
+
+	ldw r19, 12(sp)	#\
+	ldw r18, 8(sp)	 #\
+	ldw r17, 4(sp)	  #| restore r19-r16 from the stack
+	ldw r16, 0(sp)	 #/
+	addi sp, sp, 16	#/
+	ret				# return
+
+
+/* Subroutine for updating the SSD. */
+update_SSD:
+	subi sp, sp, 8	# stack
+	stw r16, 0(sp)
+	stw r17, 4(sp)
+		
+		
+		ldw r17, SSD_display_setting(r0)		# load the SSD setting
+		ifuS: 	cmpeqi r16, r17, decimal		#\ if the current setting is decimal 
+				beq r16, r0, elifuS				#/
+				stwio r0, SSD2(r23)				# make sure the first two segments of the SSD are clear
+				br _ifuS
+		elifuS:	cmpeqi r16, r17, hex			#\ if the current setting is hex
+				beq r16, r0, elseuS				#/
+				stwio r0, SSD2(r23)				# make sure the first two segments of the SSD are clear
+				br _ifuS
+		elseuS:	cmpeqi r16, r17, binary			#\ if the current setting is binary
+				beq r16, r0, _ifuS				#/
+				movi r16, 0x3f7c     			#\ set first two segments of the SSD to "0b"
+				stwio r16, SSD2(r23) 			#/
+		_ifuS:
+		
+		ldw r16, number_of_switches_selected(r0)# load the number of switches selected into r16
+		muli r16, r16, 4						# (r16 * 4) to get the byte offset for the number of switches selected
+		add r16, r16, r17						# add the display setting to the the byte offset
+		ldw r17, (r16)							# load the characters to display on the SSD
+		stwio r17, SSD1(r23)					# display characters on the SSD
+	
+	ldw r17, 4(sp)	# unstack
+	ldw r16, 0(sp)
+	addi sp, sp, 8
+	ret
+
+
+/* Irq for changing the SSD setting when the first button is pushed. */
+irq_button:
+	subi sp, sp, 12	# stack
+	stw r16, 0(sp)
+	stw r17, 4(sp)
+	stw ra, 8(sp)
+	
+		ldwio r16, BUTTONS_EDGE(r23)	#\
+		andi r16, r16, 1				 #| check if the first button was pushed
+		beq r16, r0, _irq_button		#/
+		
+		ldw r16, SSD_display_setting(r0)		# load the display setting into r16
+		ifSSD:		cmpeqi r17, r16, decimal	#\ if the current setting is decimal 
+					beq r17, r0, elifSSDa		#/
+					elseSSD:	# decimal is the default
+					movia r16, hex				# then switch to hex
+					br _ifSSD
+		elifSSDa:	cmpeqi r17, r16, hex		#\ if the current setting is hex
+					beq r17, r0, elifSSDb		#/
+					movia r16, binary			# then switch to binary
+					br _ifSSD
+		elifSSDb: 	cmpeqi r17, r16, binary		#\ if the current setting is binary
+					beq r17, r0, elseSSD		#/ (defalut is decimal)
+					movia r16, decimal			# then switch to decimal
+		_ifSSD:
+		stw r16, SSD_display_setting(r0)		# save the new display setting
+		call update_SSD							# update the SSD
+
+	
+	_irq_button:
+	ldwio  r16, BUTTONS_EDGE(r23)	#\ clear the buttons edge register
+	stwio  r16, BUTTONS_EDGE(r23)	#/
+	ldw ra, 8(sp)	# unstack
+	ldw r17, 4(sp)
+	ldw r16, 0(sp)
+	addi sp, sp, 12
+	ret
+
+
+/* Subroutine for updating the UART. */
+print_number_to_UART:
+	subi sp, sp, 28	#\
+	stw r16, 0(sp)	 #\
+	stw r17, 4(sp)	  #\
+	stw r18, 8(sp) 	   #| store r16-r21 and ra to the stack
+	stw r19, 12(sp)	   #|
+	stw r20, 16(sp)	  #/
+	stw r21, 20(sp)	 #/
+	stw ra, 24(sp)	#/
+			
+		call clear_screen							# clear the screen
+		
+		/* Write the expo_sentence on the UART. */
+		mov r19, r0								# i = 0
+		whileUART1:	cmplti r18, r19, 36			#\ while(i < 36)
+					beq r18, r0, _whileUART1	#/
+					ldb r16, expo_sentance(r19)	# load the next char to write
+					
+					call wait_on_UART	# wait on UART
+
+					
+					stbio r16, UART_DATA(r23)		# write char to UART
+					addi r19, r19, 1				# ++ i
+					br whileUART1
+		_whileUART1:
+
+	
+		ldw r16, number_of_switches_selected(r0)	# load the number of switches selected into r16
+		muli r16, r16, 8							# (r16 * 8) to get the byte offset
+		addi r16, r16, uart_data					# add the uart_data address to the byte offset
+		
+		mov r19, r0							 	#\ i = 0
+		whileUART2:	cmplti r18, r19, 8	 	 	 #| while(i < 8)
+					addi r19, r19, 1			 #/ ++i
+					beq r18, r0, _whileUART2	#/
+					
+					call wait_on_UART	# wait on UART
+					
+					ldb r17, (r16)				# load char to display
+					stbio r17, UART_DATA(r23)	# write char to UART
+					addi r16, r16, 1			# increment to the next char
+					br whileUART2
+		_whileUART2:
+	
+	
+	ldw ra, 24(sp)	#\
+	ldw r21, 20(sp)	 #\
+	ldw r20, 16(sp)	  #\
+	ldw r19, 12(sp)	   #| restore ra and r21-r16 from the stack
+	ldw r18, 8(sp)	   #|
+	ldw r17, 4(sp)	  #/
+	ldw r16, 0(sp)	 #/
+	addi sp, sp, 28	#/
+	ret				# return
+
+
+/* Wait until the UART has room to write to. */
+wait_on_UART:
+	subi sp, sp, 4	#\ store r16 to the stack
+	stw r16, 0(sp)	#/
+	
+	waitUART:
+		ldwio r16, UART_CTRL(r23)	#\
+		srli r16, r16, 16			 #| check to see if there is room to write in the UART
+		cmpgti r16, r16, 1			 #|
+		bne r16, r0, _waitUART		#/
+		br waitUART
+	_waitUART:
+
+	ldw r16, 0(sp)	#\ restore r16 from the stack
+	addi sp, sp, 4	#/
+	ret				# return
+
+
+/* Clear the UART screen. */
+clear_screen:
+	subi sp, sp, 4	#\ store r16 to the stack
+	stw r16, 0(sp)	#/
+	
+	# send the escape code for clearing the screen to the terminal ( ESC[2J )
+	movi r16, 0x1b
+	stwio r16, UART_DATA(r23)
+	movi r16, 0x5b
+	stwio r16, UART_DATA(r23)
+	movi r16, 0x32
+	stwio r16, UART_DATA(r23)
+	movi r16, 0x4a
+	stwio r16, UART_DATA(r23)
+	
+	# send the escape code for homeing the cursor to the terminal ( ESC[H )
+	movi r16, 0x1b
+	stwio r16, UART_DATA(r23)
+	movi r16, 0x5b
+	stwio r16, UART_DATA(r23)
+	movi r16, 0x48
+	stwio r16, UART_DATA(r23)
+	
+	ldw r16, 0(sp)	#\ restore r16 from the stack
+	addi sp, sp, 4	#/
+	ret				# return
+
+
+/* Timer1 IRQ (blink the LEDs). */
+irq_timer:
+	subi sp, sp, 12	# stack
+	stw r16, 0(sp)
+	stw r17, 4(sp)
+	stw r18, 8(sp)
+	
+		ldwio r16, LEDS(r23)			# load the value from the LEDs into r16
+		ldwio r17, SWITCHES(r23)		# load the value from the SWITCHES into r17
+		
+		ifTQ:	cmpeq r18, r16, r0		#\ if the LEDs our off
+				beq r18, r0, elseTQ		#/
+				stwio r17, LEDS(r23)	# turn them on
+				br _ifTQ
+		elseTQ:							# else
+				stwio r0, LEDS(r23)		# turn them off
+		_ifTQ:
+	
+	stwio r0, TIMER1_DATA(r23)		# reset the timer
+	ldw r18, 8(sp)	# unstack
+	ldw r17, 4(sp)
+	ldw r16, 0(sp)
+	addi sp, sp, 12
+	ret
+
+
+/* Set up Timer1. */
+set_timer:
+	subi sp, sp, 4	# stack
+	stw r16, 0(sp)
+	
+		stwio r0, TIMER1_DATA(r23)	# reset the timer
+		
+		movi r16, %lo(TIMER_CDV)	#\ store the lower half of the count down value
+		stwio r16, TIMER1_LC(r23)	#/
+		movi r16, %hi(TIMER_CDV)	#\ store the high half of the count down value
+		stwio r16, TIMER1_HC(r23)	#/
+		movi r16, 0b111				#\ start the timer, turn on countinuos, and turn on interrupts
+		stwio r16, TIMER1_CTRL(r23)	#/
+
+	ldw r16, 0(sp)	# unstack
+	addi sp, sp, 4
+	ret
+
+
+/* Set up the buttons. */
+set_buttons:
+	subi sp, sp, 4	# stack
+	stw r16, 0(sp)
+	
+		movi r16, 0b01					# bit mask
+		stwio r16, BUTTONS_MASK(r23)	# enable interrupts
+
+	ldw r16, 0(sp)	# unstack
+	addi sp, sp, 4
+	ret
+
+/* Enable interrupts. */
+enable_interrupts:
+	subi sp, sp, 4	# stack
+	stw r16, 0(sp)
+	
+		movi r16, 0b11			#\ turn on buttons and timer1
+		wrctl ienable, r16		#/
+		movi r16, 1				#\ enable interrupts
+		wrctl status, r16		#/
+
+	ldw r16, 0(sp)	# unstack
+	addi sp, sp, 4
+	ret
+
+
+.data
+decimal: 					# characters for SSD decimal 0-10
+.word 0x0000003f	# 0
+.word 0x00000006	# 1
+.word 0x0000005b	# 2
+.word 0x0000004f	# 3
+.word 0x00000066	# 4
+.word 0x0000006d	# 5
+.word 0x0000007d	# 6
+.word 0x00000007	# 7
+.word 0x0000007f	# 8
+.word 0x00000067	# 9
+.word 0x0000063f	# 10
+hex:						# characters for SSD hex 0x0-0xa
+.word 0x003f763f	# 0x0
+.word 0x003f7606	# 0x1
+.word 0x003f765b	# 0x2
+.word 0x003f764f	# 0x3
+.word 0x003f7666	# 0x4
+.word 0x003f766d	# 0x5
+.word 0x003f767d	# 0x6
+.word 0x003f7607	# 0x7
+.word 0x003f767f	# 0x8
+.word 0x003f7667	# 0x9
+.word 0x003f7677	# 0xa
+binary:						# characters for SSD binary 0b0-0b1010 (note the leading 0b is put in the second segment)
+.word 0x3f3f3f3f	# 0000
+.word 0x3f3f3f06	# 0001
+.word 0x3f3f063f	# 0010
+.word 0x3f3f0606	# 0011
+.word 0x3f063f3f	# 0100
+.word 0x3f063f06	# 0101
+.word 0x3f06063f	# 0110
+.word 0x3f060606	# 0111
+.word 0x063f3f3f	# 1000
+.word 0x063f3f06	# 1001
+.word 0x063f063f	# 1010
+
+uart_data:						# words for the UART
+.word 0x6f72655a, 0x00000000	# Zero
+.word 0x00656e4f, 0x00000000	# One
+.word 0x006f7754, 0x00000000	# Two
+.word 0x65726854, 0x00000065	# Three
+.word 0x72756f46, 0x00000000	# Four
+.word 0x65766946, 0x00000000	# Five
+.word 0x00786953, 0x00000000	# Six
+.word 0x65766553, 0x0000006e	# Seven
+.word 0x68676945, 0x00000074	# Eight
+.word 0x656e694e, 0x00000000	# Nine
+.word 0x006e6554, 0x00000000	# Ten
+
+expo_sentance: 	# explainitory sentance for the UART "The number of switches selected is: "
+.asciz "The number of switches selected is: "
+.align 2 
+
+number_of_switches_selected: .word 1		# this is set to 1 in order to trigger the updating output
+prev_number_of_switches_selected: .word 0
+SSD_display_setting: .word decimal
+.align 2 
+
+
+.section .reset, "ax"
+	br _start
+
+.section .exceptions, "ax"
+	subi sp, sp, 8
+	stw r16, 0(sp)
+	stw ra, 4(sp)
+	
+	rdctl et, estatus		# check if intterupts are enabled
+	andi et, et, 1
+	beq et, r0, ex_done
+	rdctl et, ipending		# check if interupts are pending
+	beq et, r0, ex_done		
+	
+	andi r16, et, 0b01		# if timer1 caused an interrupt...
+	beq r16, r0, skip_LEDS
+	call irq_timer
+	skip_LEDS:
+	
+	andi r16, et, 0b10		# if the buttons caused an interrupt...
+	beq r16, r0, ex_done
+	call irq_button
+	
+	ex_done:
+	ldw ra, 4(sp)
+	ldw r16, 0(sp)
+	addi sp, sp, 8
+	subi ea, ea, 4
+	eret
+	
+.end
+
+When a user selects switches this program turns on the corresponding LEDs which flash on and off every second. 
+It will also display the number of switches selected on the seven-segment display
+in decimal, binary, or hex which the user can toggle through using the first push button.
+The UART also displays the number of switches selected in text.
+
+
+
+
+
+
