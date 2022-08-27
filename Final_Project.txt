@@ -4,27 +4,27 @@
 # constants
 .set IO_BASE,		0xff200000			# base io address
 
-.set LEDS,			0x0					# LED offset
+.set LEDS,			0x0			# LED offset
 
 .set SWITCHES,		0x040				# SWITCHES offset
 
 .set BUTTONS_DATA,	0x50				# BUTTONS, DATA offset
-.set BUTTONS_MASK,	0x8+BUTTONS_DATA	# MASK offset
-.set BUTTONS_EDGE,	0xc+BUTTONS_DATA	# EDGE offset
+.set BUTTONS_MASK,	0x8+BUTTONS_DATA		# MASK offset
+.set BUTTONS_EDGE,	0xc+BUTTONS_DATA		# EDGE offset
 
-.set SSD1,			0x20				# seven-segment-display segment 1 offset
-.set SSD2,			0x30				# seven-segment-display segment 2 offset
+.set SSD1,			0x20			# seven-segment-display segment 1 offset
+.set SSD2,			0x30			# seven-segment-display segment 2 offset
 
 .set UART_DATA,		0x1000				# UART, DATA offset
-.set UART_CTRL,		0x4+UART_DATA		# CTRL offset
+.set UART_CTRL,		0x4+UART_DATA			# CTRL offset
 
 .set TIMER1_DATA,	0x2000				# TIMER1, DATA offset
-.set TIMER1_CTRL,	0x4+TIMER1_DATA		# CTRL offset
-.set TIMER1_LC,		0x8+TIMER1_DATA		# LC offset
-.set TIMER1_HC,		0xc+TIMER1_DATA		# HC offset
+.set TIMER1_CTRL,	0x4+TIMER1_DATA			# CTRL offset
+.set TIMER1_LC,		0x8+TIMER1_DATA			# LC offset
+.set TIMER1_HC,		0xc+TIMER1_DATA			# HC offset
 .set TIMER_CDV,		100000000			# TIMER COUNT DOWN VALUE
 
-.set TOS,			0x400000			# top of stack
+.set TOS,			0x400000		# top of stack
 
 .global _start
 .text
@@ -35,22 +35,22 @@ movia sp, TOS			# store stack address in sp
 
 call set_timer			# set up the timer
 call set_buttons		# set up the buttons
-call enable_interrupts	# start interrupts
+call enable_interrupts		# start interrupts
 
 
 loop: 	# loop forever
 
-call count_switches								# count the number of switches selected
+call count_switches				# count the number of switches selected
 
 ldw r2, number_of_switches_selected(r0)			#\
-ldw r3, prev_number_of_switches_selected(r0)	 #| if the number of selected switches has changed...
-cmpne r4, r3, r2								 #|
-beq r4, r0, no_subs								#/
+ldw r3, prev_number_of_switches_selected(r0)	 	 #| if the number of selected switches has changed...
+cmpne r4, r3, r2					 #|
+beq r4, r0, no_subs					#/
 
-	call set_timer								# restart the timer
-	call update_SSD								# update the SSD
-	call update_LEDS							# update the LEDs
-	call print_number_to_UART					# update the UART
+	call set_timer					# restart the timer
+	call update_SSD					# update the SSD
+	call update_LEDS				# update the LEDs
+	call print_number_to_UART			# update the UART
 
 no_subs:
 
@@ -62,8 +62,8 @@ update_LEDS:
 	subi sp, sp, 4	# stack
 	stw r16, 0(sp)
 	
-		ldwio r16, SWITCHES(r23)	# load the value from the switches
-		stwio r16, LEDS(r23)		# store that value in the LEDs
+		ldwio r16, SWITCHES(r23)		# load the value from the switches
+		stwio r16, LEDS(r23)			# store that value in the LEDs
 		
 	ldw r16, 0(sp)	# unstack
 	addi sp, sp, 4
@@ -79,19 +79,19 @@ count_switches:
 	stw r19, 12(sp)	#/
 	
 		ldw r16, number_of_switches_selected(r0)		#\ update prev_number_of_switches
-		stw r16, prev_number_of_switches_selected(r0)	#/
+		stw r16, prev_number_of_switches_selected(r0)		#/
 
-		ldwio r16, SWITCHES(r23)		# load the value from the switches into r16
-		slli r16, r16, 22 				# shift the value from the switches 22 bits to the left to ignore the extra bits
+		ldwio r16, SWITCHES(r23)				# load the value from the switches into r16
+		slli r16, r16, 22 					# shift the value from the switches 22 bits to the left to ignore the extra bits
 		mov r17, r0						# set r17 to 0 to use it as an acumulator
 		mov r18, r0						# i = 0
-		whileSWC:	cmplti r19, r18, 10		#\
+		whileSWC:	cmplti r19, r18, 10			#\
 					addi r18, r18, 1 		 #| while(i < 10) and i++
-					beq r19, r0, _whileSWC	#/
+					beq r19, r0, _whileSWC		#/
 					ifSWC: 	cmplt r19, r16, r0		#\ if (r16 < r0) "if r16 is negative"
 							beq r19, r0, skipSWC	#/
 							addi r17, r17, 1		# ++ the accumulator
-					skipSWC:						# skip incrementing the acumulator
+					skipSWC:					# skip incrementing the acumulator
 					slli r16, r16, 1 		# shift the value from the switches 1 digit to the left to look at the next bit
 					br whileSWC
 		_whileSWC:
@@ -116,24 +116,24 @@ update_SSD:
 		
 		ldw r17, SSD_display_setting(r0)		# load the SSD setting
 		ifuS: 	cmpeqi r16, r17, decimal		#\ if the current setting is decimal 
-				beq r16, r0, elifuS				#/
-				stwio r0, SSD2(r23)				# make sure the first two segments of the SSD are clear
+				beq r16, r0, elifuS		#/
+				stwio r0, SSD2(r23)		# make sure the first two segments of the SSD are clear
 				br _ifuS
 		elifuS:	cmpeqi r16, r17, hex			#\ if the current setting is hex
-				beq r16, r0, elseuS				#/
-				stwio r0, SSD2(r23)				# make sure the first two segments of the SSD are clear
+				beq r16, r0, elseuS		#/
+				stwio r0, SSD2(r23)		# make sure the first two segments of the SSD are clear
 				br _ifuS
 		elseuS:	cmpeqi r16, r17, binary			#\ if the current setting is binary
-				beq r16, r0, _ifuS				#/
-				movi r16, 0x3f7c     			#\ set first two segments of the SSD to "0b"
-				stwio r16, SSD2(r23) 			#/
+				beq r16, r0, _ifuS		#/
+				movi r16, 0x3f7c     		#\ set first two segments of the SSD to "0b"
+				stwio r16, SSD2(r23) 		#/
 		_ifuS:
 		
-		ldw r16, number_of_switches_selected(r0)# load the number of switches selected into r16
-		muli r16, r16, 4						# (r16 * 4) to get the byte offset for the number of switches selected
-		add r16, r16, r17						# add the display setting to the the byte offset
-		ldw r17, (r16)							# load the characters to display on the SSD
-		stwio r17, SSD1(r23)					# display characters on the SSD
+		ldw r16, number_of_switches_selected(r0)	# load the number of switches selected into r16
+		muli r16, r16, 4				# (r16 * 4) to get the byte offset for the number of switches selected
+		add r16, r16, r17				# add the display setting to the the byte offset
+		ldw r17, (r16)					# load the characters to display on the SSD
+		stwio r17, SSD1(r23)				# display characters on the SSD
 	
 	ldw r17, 4(sp)	# unstack
 	ldw r16, 0(sp)
@@ -148,26 +148,26 @@ irq_button:
 	stw r17, 4(sp)
 	stw ra, 8(sp)
 	
-		ldwio r16, BUTTONS_EDGE(r23)	#\
+		ldwio r16, BUTTONS_EDGE(r23)			#\
 		andi r16, r16, 1				 #| check if the first button was pushed
-		beq r16, r0, _irq_button		#/
+		beq r16, r0, _irq_button			#/
 		
 		ldw r16, SSD_display_setting(r0)		# load the display setting into r16
 		ifSSD:		cmpeqi r17, r16, decimal	#\ if the current setting is decimal 
-					beq r17, r0, elifSSDa		#/
-					elseSSD:	# decimal is the default
-					movia r16, hex				# then switch to hex
+					beq r17, r0, elifSSDa	#/
+					elseSSD:		# decimal is the default
+					movia r16, hex		# then switch to hex
 					br _ifSSD
 		elifSSDa:	cmpeqi r17, r16, hex		#\ if the current setting is hex
-					beq r17, r0, elifSSDb		#/
-					movia r16, binary			# then switch to binary
+					beq r17, r0, elifSSDb	#/
+					movia r16, binary	# then switch to binary
 					br _ifSSD
 		elifSSDb: 	cmpeqi r17, r16, binary		#\ if the current setting is binary
-					beq r17, r0, elseSSD		#/ (defalut is decimal)
-					movia r16, decimal			# then switch to decimal
+					beq r17, r0, elseSSD	#/ (defalut is decimal)
+					movia r16, decimal	# then switch to decimal
 		_ifSSD:
 		stw r16, SSD_display_setting(r0)		# save the new display setting
-		call update_SSD							# update the SSD
+		call update_SSD					# update the SSD
 
 	
 	_irq_button:
@@ -191,37 +191,37 @@ print_number_to_UART:
 	stw r21, 20(sp)	 #/
 	stw ra, 24(sp)	#/
 			
-		call clear_screen							# clear the screen
+		call clear_screen					# clear the screen
 		
 		/* Write the expo_sentence on the UART. */
-		mov r19, r0								# i = 0
+		mov r19, r0						# i = 0
 		whileUART1:	cmplti r18, r19, 36			#\ while(i < 36)
 					beq r18, r0, _whileUART1	#/
 					ldb r16, expo_sentance(r19)	# load the next char to write
 					
-					call wait_on_UART	# wait on UART
+					call wait_on_UART		# wait on UART
 
 					
-					stbio r16, UART_DATA(r23)		# write char to UART
-					addi r19, r19, 1				# ++ i
+					stbio r16, UART_DATA(r23)	# write char to UART
+					addi r19, r19, 1		# ++ i
 					br whileUART1
 		_whileUART1:
 
 	
-		ldw r16, number_of_switches_selected(r0)	# load the number of switches selected into r16
-		muli r16, r16, 8							# (r16 * 8) to get the byte offset
-		addi r16, r16, uart_data					# add the uart_data address to the byte offset
+		ldw r16, number_of_switches_selected(r0)		# load the number of switches selected into r16
+		muli r16, r16, 8					# (r16 * 8) to get the byte offset
+		addi r16, r16, uart_data				# add the uart_data address to the byte offset
 		
-		mov r19, r0							 	#\ i = 0
+		mov r19, r0						#\ i = 0
 		whileUART2:	cmplti r18, r19, 8	 	 	 #| while(i < 8)
-					addi r19, r19, 1			 #/ ++i
+					addi r19, r19, 1		 #/ ++i
 					beq r18, r0, _whileUART2	#/
 					
-					call wait_on_UART	# wait on UART
+					call wait_on_UART		# wait on UART
 					
-					ldb r17, (r16)				# load char to display
+					ldb r17, (r16)			# load char to display
 					stbio r17, UART_DATA(r23)	# write char to UART
-					addi r16, r16, 1			# increment to the next char
+					addi r16, r16, 1		# increment to the next char
 					br whileUART2
 		_whileUART2:
 	
@@ -243,15 +243,15 @@ wait_on_UART:
 	stw r16, 0(sp)	#/
 	
 	waitUART:
-		ldwio r16, UART_CTRL(r23)	#\
+		ldwio r16, UART_CTRL(r23)		#\
 		srli r16, r16, 16			 #| check to see if there is room to write in the UART
 		cmpgti r16, r16, 1			 #|
-		bne r16, r0, _waitUART		#/
+		bne r16, r0, _waitUART			#/
 		br waitUART
 	_waitUART:
 
-	ldw r16, 0(sp)	#\ restore r16 from the stack
-	addi sp, sp, 4	#/
+	ldw r16, 0(sp)		#\ restore r16 from the stack
+	addi sp, sp, 4		#/
 	ret				# return
 
 
@@ -278,8 +278,8 @@ clear_screen:
 	movi r16, 0x48
 	stwio r16, UART_DATA(r23)
 	
-	ldw r16, 0(sp)	#\ restore r16 from the stack
-	addi sp, sp, 4	#/
+	ldw r16, 0(sp)		#\ restore r16 from the stack
+	addi sp, sp, 4		#/
 	ret				# return
 
 
@@ -294,10 +294,10 @@ irq_timer:
 		ldwio r17, SWITCHES(r23)		# load the value from the SWITCHES into r17
 		
 		ifTQ:	cmpeq r18, r16, r0		#\ if the LEDs our off
-				beq r18, r0, elseTQ		#/
+				beq r18, r0, elseTQ	#/
 				stwio r17, LEDS(r23)	# turn them on
 				br _ifTQ
-		elseTQ:							# else
+		elseTQ:						# else
 				stwio r0, LEDS(r23)		# turn them off
 		_ifTQ:
 	
@@ -323,20 +323,20 @@ set_timer:
 		movi r16, 0b111				#\ start the timer, turn on countinuos, and turn on interrupts
 		stwio r16, TIMER1_CTRL(r23)	#/
 
-	ldw r16, 0(sp)	# unstack
+	ldw r16, 0(sp)		# unstack
 	addi sp, sp, 4
 	ret
 
 
 /* Set up the buttons. */
 set_buttons:
-	subi sp, sp, 4	# stack
+	subi sp, sp, 4		# stack
 	stw r16, 0(sp)
 	
-		movi r16, 0b01					# bit mask
+		movi r16, 0b01			# bit mask
 		stwio r16, BUTTONS_MASK(r23)	# enable interrupts
 
-	ldw r16, 0(sp)	# unstack
+	ldw r16, 0(sp)		# unstack
 	addi sp, sp, 4
 	ret
 
@@ -347,7 +347,7 @@ enable_interrupts:
 	
 		movi r16, 0b11			#\ turn on buttons and timer1
 		wrctl ienable, r16		#/
-		movi r16, 1				#\ enable interrupts
+		movi r16, 1			#\ enable interrupts
 		wrctl status, r16		#/
 
 	ldw r16, 0(sp)	# unstack
@@ -406,7 +406,7 @@ uart_data:						# words for the UART
 .word 0x656e694e, 0x00000000	# Nine
 .word 0x006e6554, 0x00000000	# Ten
 
-expo_sentance: 	# explainitory sentance for the UART "The number of switches selected is: "
+expo_sentance: 					# explainitory sentance for the UART "The number of switches selected is: "
 .asciz "The number of switches selected is: "
 .align 2 
 
